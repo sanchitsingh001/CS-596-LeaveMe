@@ -4,7 +4,7 @@
 Yana
 
 ## Git Repository
-https://github.com/jaidarkknight1/LeaveMeAlone
+https://github.com/sanchitsingh001/CS-596-LeaveMe.git
 
 ---
 
