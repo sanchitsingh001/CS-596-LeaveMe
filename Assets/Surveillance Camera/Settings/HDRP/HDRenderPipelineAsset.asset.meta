@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 72f13fb182a4f5345a94ec5311af9771
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 264577
+  packageName: Surveillance Camera
+  packageVersion: 1.0
+  assetPath: Assets/AK Studio Art/Surveillance Camera/Settings/HDRP/HDRenderPipelineAsset.asset
+  uploadId: 664797

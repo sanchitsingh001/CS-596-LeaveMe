@@ -1,0 +1,22 @@
+Library/
+Temp/
+obj/
+Build/
+Builds/
+Logs/
+UserSettings/
+
+# Unity regenerates these per machine (avoid leaking paths / old machine layout)
+*.csproj
+*.sln
+
+.vs/
+
+*.bytes
+*.spz
+*.tmp
+
+# Cursor / local editor metadata (never ship in repo)
+.cursor/
+.cursorrules
+.cursorignore

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 7818c64c3da9a1d4aa554aaecf6d3b9a
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 264577
+  packageName: Surveillance Camera
+  packageVersion: 1.0
+  assetPath: Assets/AK Studio Art/Surveillance Camera/Settings/HDRP/SkinDiffusionProfile.asset
+  uploadId: 664797

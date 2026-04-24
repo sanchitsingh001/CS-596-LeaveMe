@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 34b0c7eb9ca2e004e9438c39813788af
+timeCreated: 1514998175
+licenseType: Store
+NativeFormatImporter:
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 108425
+  packageName: PBR Pizza
+  packageVersion: 1.0
+  assetPath: Assets/Pizza/Materials/Pizza.mat
+  uploadId: 226146
