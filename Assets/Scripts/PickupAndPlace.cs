@@ -2,7 +2,7 @@ using UnityEngine;
 
 /// <summary>
 /// Pick up any Pickable-tagged Rigidbody with F.
-/// When dropped inside a trigger zone tagged "PlacementZone", the item snaps to the
+/// When dropped inside a trigger with a PlacementZone component, the item snaps to the
 /// zone centre, becomes kinematic, and stays put — simulating placing it on a shelf.
 /// Press F while looking at a placed item to pick it back up.
 ///
@@ -20,10 +20,6 @@ public class PickupAndPlace : MonoBehaviour
     private GameObject _heldObject = null;
     private Rigidbody  _heldRb;
 
-    // ── Legacy public aliases so existing scene references keep working ──────
-    private GameObject heldObject  { get => _heldObject; set => _heldObject = value; }
-    private Rigidbody  heldRb      { get => _heldRb;     set => _heldRb     = value; }
-
     private GUIStyle _hintStyle;
     private bool     _showPickHint = false;
 
@@ -37,9 +33,39 @@ public class PickupAndPlace : MonoBehaviour
         if (_heldObject != null)
         {
             // Smoothly carry the object to the hold position
+            Vector3 targetPos = holdPosition.position;
+            Quaternion targetRot = holdPosition.rotation;
+
+            // Optional per-item offsets (useful for phones/books so they sit nicely in view)
+            HeldItemOffsets offsets = _heldObject.GetComponent<HeldItemOffsets>();
+            if (offsets != null && offsets.enabled)
+            {
+                targetPos = holdPosition.TransformPoint(offsets.localPositionOffset);
+                Quaternion baseRot = holdPosition.rotation;
+                if (offsets.faceCameraWhileHeld && Camera.main != null)
+                {
+                    Vector3 desiredForward = -Camera.main.transform.forward;
+                    Vector3 desiredUp = Camera.main.transform.up;
+
+                    Vector3 localF = offsets.faceCameraLocalForwardAxis.sqrMagnitude < 0.0001f
+                        ? Vector3.forward
+                        : offsets.faceCameraLocalForwardAxis.normalized;
+                    Vector3 localU = offsets.faceCameraLocalUpAxis.sqrMagnitude < 0.0001f
+                        ? Vector3.up
+                        : offsets.faceCameraLocalUpAxis.normalized;
+
+                    // Rotate so (itemLocalForward,itemLocalUp) maps to (desiredForward,desiredUp).
+                    Quaternion localBasis = Quaternion.LookRotation(localF, localU);
+                    Quaternion desiredBasis = Quaternion.LookRotation(desiredForward, desiredUp);
+                    baseRot = desiredBasis * Quaternion.Inverse(localBasis);
+                }
+
+                targetRot = baseRot * Quaternion.Euler(offsets.localEulerOffset);
+            }
+
             _heldObject.transform.position = Vector3.Lerp(
-                _heldObject.transform.position, holdPosition.position, Time.deltaTime * 15f);
-            _heldObject.transform.rotation = holdPosition.rotation;
+                _heldObject.transform.position, targetPos, Time.deltaTime * 15f);
+            _heldObject.transform.rotation = targetRot;
 
             if (Input.GetKeyDown(pickupKey))
                 DropObject();
@@ -51,15 +77,33 @@ public class PickupAndPlace : MonoBehaviour
         Ray ray = Camera.main.ScreenPointToRay(
             new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f));
 
-        if (Physics.Raycast(ray, out RaycastHit hit, pickupDistance))
+        // Use a small spherecast so slight collider/model offsets still feel accurate.
+        if (Physics.SphereCast(ray, 0.12f, out RaycastHit hit, pickupDistance))
         {
-            if (hit.collider.CompareTag("Pickable"))
+            GameObject pickable = ResolvePickable(hit.collider);
+            if (pickable != null)
             {
                 _showPickHint = true;
                 if (Input.GetKeyDown(pickupKey))
-                    TryPickup(hit.collider.gameObject);
+                    TryPickup(pickable);
             }
         }
+    }
+
+    private static GameObject ResolvePickable(Collider col)
+    {
+        if (col == null) return null;
+
+        // Raycasts often hit a child collider; allow picking the parent object
+        // as long as SOME ancestor is tagged Pickable.
+        Transform t = col.transform;
+        while (t != null)
+        {
+            if (t.CompareTag("Pickable"))
+                return t.gameObject;
+            t = t.parent;
+        }
+        return null;
     }
 
     /// <summary>Returns the currently held object, or null.</summary>
@@ -81,7 +125,9 @@ public class PickupAndPlace : MonoBehaviour
         PlacementZone[] zones = FindObjectsByType<PlacementZone>(FindObjectsSortMode.None);
         foreach (var zone in zones)
         {
-            if (zone.GetPlacedItem() == target)
+            var placed = zone.GetPlacedItem();
+            if (placed == null) continue;
+            if (placed == target || target.transform.IsChildOf(placed.transform))
             {
                 zone.EjectPlacedItem();
                 break;
@@ -138,6 +184,7 @@ public class PickupAndPlace : MonoBehaviour
             {
                 _heldRb.detectCollisions = true;
                 _heldRb.isKinematic      = false;
+                _heldRb.useGravity       = true;
             }
         }
 

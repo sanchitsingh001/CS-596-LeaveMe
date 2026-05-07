@@ -13,12 +13,26 @@ public class PlacementZone : MonoBehaviour
     [Tooltip("Name label shown on the HUD when looking at the zone.")]
     public string zoneName = "Shelf";
 
+    [Header("Debug")]
+    [Tooltip("If enabled, prints a console log whenever an item is placed here.")]
+    public bool logPlacement;
+
+    [Header("Optional initial item")]
+    [Tooltip("If set, this item will be snapped into this zone on Start (useful for items that begin inside the fridge).")]
+    [SerializeField] private GameObject initialItem;
+
     private GameObject _placedItem;
 
     private void Awake()
     {
         // Ensure the collider is a trigger
         GetComponent<Collider>().isTrigger = true;
+    }
+
+    private void Start()
+    {
+        if (_placedItem == null && initialItem != null)
+            PlaceItem(initialItem);
     }
 
     /// <summary>Called by PickupAndPlace when the player releases an item inside this zone.</summary>
@@ -42,7 +56,8 @@ public class PlacementZone : MonoBehaviour
             rb.detectCollisions = false;
         }
 
-        Debug.Log($"[PlacementZone] '{item.name}' placed in '{zoneName}'.");
+        if (logPlacement)
+            Debug.Log($"[PlacementZone] '{item.name}' placed in '{zoneName}'.");
     }
 
     /// <summary>Remove the currently placed item (called by PickupAndPlace on re-pickup).</summary>

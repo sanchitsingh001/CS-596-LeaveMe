@@ -4,10 +4,14 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
+/// <summary>
+/// World-space readable book UI. Opens on [E] when looked at, paginates text using TMP,
+/// and exposes open/close events for narrative systems.
+/// </summary>
 public class BookController : MonoBehaviour
 {
-    BookWorldVisual _bookVisual;
-    FPSController _fpsController;
+    private BookWorldVisual _bookVisual;
+    private FPSController _fpsController;
     [TextArea(3, 10)]
     public string[] pages;          // Fill these in Inspector
     public TMP_Text pageText;       // Drag PageText here (front page layer)
@@ -74,14 +78,6 @@ public class BookController : MonoBehaviour
 
     private AudioSource _bookAudio;
 
-    [Header("PDF import (bonus)")]
-    [Tooltip("On Start, replace the Pages array with text extracted from a PDF (one string per PDF page).")]
-    public bool loadPdfOnStart;
-    [Tooltip("File name inside the StreamingAssets folder (e.g. BookContent.pdf).")]
-    public string pdfFileInStreamingAssets = "BookContent.pdf";
-    [Tooltip("If set, this path is used instead of StreamingAssets (full path to .pdf).")]
-    public string pdfAbsolutePath = "";
-
     [Tooltip("If text is mirrored, toggle this (or fix Canvas scale: avoid negative X/Y on the Canvas root).")]
     public bool flipCanvasLocalX;
 
@@ -92,8 +88,10 @@ public class BookController : MonoBehaviour
     public bool pageTextAutoSize = true;
     public float pageTextFontSizeMin = 26f;
     public float pageTextFontSizeMax = 72f;
-    [Tooltip("How TMP handles content larger than the rect. Overflow shows full text; Truncate clips at edges.")]
+    [Tooltip("How TMP handles content larger than the rect. Overflow shows full text; Truncate clips at edges. Ignored when Use Automatic Pagination is on (TMP Page mode is forced).")]
     public TextOverflowModes pageTextOverflow = TextOverflowModes.Overflow;
+    [Tooltip("If on, all entries in 'pages' are concatenated and TMP paginates them automatically by the page rect. The < / > buttons then walk TMP's actual page count, so growing entries always create new pages.")]
+    public bool useAutomaticPagination = true;
 
     [Header("Canvas size & alignment (world space)")]
     [Tooltip("Virtual canvas width in UI units (like pixels). Physical width still comes from canvasWorldDimensions / pageFaceCollider. Larger = sharper TextMesh Pro.")]
@@ -121,9 +119,11 @@ public class BookController : MonoBehaviour
 
     private int currentPage = 0;
     private bool isOpen = false;
+    private bool _hasOpenedBefore = false;
+    private int _totalPages = 1;
     private Vector3 _bookUILocalScale = Vector3.one;
-    bool _pageTurnBusy;
-    Coroutine _pageTurnRoutine;
+    private bool _pageTurnBusy;
+    private Coroutine _pageTurnRoutine;
 
     void Awake()
     {
@@ -173,46 +173,10 @@ public class BookController : MonoBehaviour
         if (closeButton != null)
             closeButton.onClick.AddListener(CloseBook);
 
-        TryLoadPdfOnStart();
-
         if (pages == null || pages.Length == 0)
             pages = DefaultStoryPages();
 
-        _fpsController = FindObjectOfType<FPSController>();
-    }
-
-    void TryLoadPdfOnStart()
-    {
-        if (!loadPdfOnStart)
-            return;
-
-        string path = !string.IsNullOrWhiteSpace(pdfAbsolutePath)
-            ? pdfAbsolutePath
-            : BookPdfImporter.StreamingAssetsPath(pdfFileInStreamingAssets);
-
-        if (BookPdfImporter.TryLoadPages(path, out string[] pdfPages, out string err))
-            pages = pdfPages;
-        else
-            Debug.LogWarning("BookController: could not load PDF — " + err + " Falling back to Inspector pages or default story.", this);
-    }
-
-    /// <summary>Bonus: reload <see cref="pages"/> from the configured PDF while playing.</summary>
-    public void ReloadPagesFromPdf()
-    {
-        string path = !string.IsNullOrWhiteSpace(pdfAbsolutePath)
-            ? pdfAbsolutePath
-            : BookPdfImporter.StreamingAssetsPath(pdfFileInStreamingAssets);
-
-        if (!BookPdfImporter.TryLoadPages(path, out string[] pdfPages, out string err))
-        {
-            Debug.LogWarning("BookController: PDF reload failed — " + err, this);
-            return;
-        }
-
-        pages = pdfPages;
-        currentPage = Mathf.Clamp(currentPage, 0, Mathf.Max(0, pages.Length - 1));
-        if (isOpen)
-            DisplayPageInstant();
+        _fpsController = FindFirstObjectByType<FPSController>();
     }
 
     void BuildDefaultWorldBookUI()
@@ -428,12 +392,18 @@ public class BookController : MonoBehaviour
         if (!configurePageTextLayout || pageText == null)
             return;
 
+        // TMP's Page overflow paginates content based on the actual rect — what we want
+        // for the logbook so growing entries always become real pages we can flip to.
+        // AutoSize is incompatible with Page overflow, so we have to force it off there.
+        TextOverflowModes overflow = useAutomaticPagination ? TextOverflowModes.Page : pageTextOverflow;
+        bool autoSize = pageTextAutoSize && overflow != TextOverflowModes.Page;
+
         foreach (TMP_Text t in EnumeratePageTextLayers())
         {
             t.textWrappingMode = TextWrappingModes.Normal;
-            t.overflowMode = pageTextOverflow;
-            t.enableAutoSizing = pageTextAutoSize;
-            if (pageTextAutoSize)
+            t.overflowMode = overflow;
+            t.enableAutoSizing = autoSize;
+            if (autoSize)
             {
                 t.fontSizeMin = pageTextFontSizeMin;
                 t.fontSizeMax = pageTextFontSizeMax;
@@ -484,6 +454,49 @@ public class BookController : MonoBehaviour
 
     private bool _showHint = false;
     private GUIStyle _hintStyle;
+
+    /// <summary>
+    /// Fired after the book is successfully opened (UI activated, input disabled).
+    /// Used by narrative systems (e.g. Logbook) to react to the player reading.
+    /// </summary>
+    public System.Action OnBookOpened;
+
+    /// <summary>
+    /// Fired after the book is closed (UI hidden, input re-enabled).
+    /// </summary>
+    public System.Action OnBookClosed;
+
+    /// <summary>
+    /// If the book is currently open, re-applies the current page text immediately.
+    /// Useful when some external system updates <see cref="pages"/> while reading.
+    /// </summary>
+    public void RefreshPageContentIfOpen()
+    {
+        if (!isOpen) return;
+        if (pages == null || pages.Length == 0) return;
+        if (pageText == null) return;
+
+        // Apply the new content first so _totalPages reflects any pages that
+        // grew (TMP only knows the page count after a mesh update).
+        ApplyPageContent();
+
+        int latestPage = GetTotalPages() - 1;
+        if (currentPage != latestPage)
+        {
+            // New entries always land on the last page; snap there so the
+            // player sees the freshly added content instead of stale text.
+            if (_pageTurnRoutine != null)
+            {
+                StopCoroutine(_pageTurnRoutine);
+                _pageTurnRoutine = null;
+            }
+            _pageTurnBusy = false;
+            currentPage = latestPage;
+            ResetPageTurnVisuals();
+            PlayPageTurnSound();
+            ApplyPageContent();
+        }
+    }
 
     void OnGUI()
     {
@@ -557,7 +570,15 @@ public class BookController : MonoBehaviour
             return;
 
         isOpen = true;
-        currentPage = 0;
+        // First read: start at the beginning so the player sees the story in order.
+        // Subsequent reads: jump to the latest page so newly added entries are immediately visible.
+        // _totalPages is recomputed inside ApplyPageContent below; we set a sane initial
+        // currentPage here and ApplyPageContent will clamp it once TMP knows the real count.
+        if (_hasOpenedBefore && pages != null && pages.Length > 0)
+            currentPage = int.MaxValue;
+        else
+            currentPage = 0;
+        _hasOpenedBefore = true;
         var cv = bookUI.GetComponent<Canvas>();
         if (cv != null && cv.worldCamera == null)
             cv.worldCamera = Camera.main;
@@ -585,6 +606,8 @@ public class BookController : MonoBehaviour
 
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
+
+        OnBookOpened?.Invoke();
     }
 
     public void CloseBook()
@@ -611,6 +634,8 @@ public class BookController : MonoBehaviour
 
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
+
+        OnBookClosed?.Invoke();
     }
 
     void DisplayPageInstant()
@@ -623,25 +648,76 @@ public class BookController : MonoBehaviour
 
     void ApplyPageContent()
     {
-        pageText.text = pages[currentPage];
-        if (pageTextBack != null)
+        if (pages == null || pages.Length == 0 || pageText == null)
+            return;
+
+        int totalPages;
+        if (useAutomaticPagination)
         {
-            MatchPageTextFormat(pageTextBack, pageText);
-            pageTextBack.text = pages[currentPage];
-            CanvasGroup cg = pageTextBack.GetComponent<CanvasGroup>();
-            if (cg != null)
-                cg.alpha = 0f;
+            // Concatenate all entries; TMP Page overflow will split them by what
+            // actually fits in the page rect, so adding entries grows pageCount.
+            string joined = JoinPagesForAutoPagination(pages);
+            pageText.text = joined;
+            if (pageTextBack != null)
+            {
+                MatchPageTextFormat(pageTextBack, pageText);
+                pageTextBack.text = joined;
+                CanvasGroup bcg = pageTextBack.GetComponent<CanvasGroup>();
+                if (bcg != null)
+                    bcg.alpha = 0f;
+            }
+
+            ForceBookUILayout();
+            pageText.ForceMeshUpdate();
+            totalPages = (pageText.textInfo != null) ? Mathf.Max(1, pageText.textInfo.pageCount) : 1;
+
+            currentPage = Mathf.Clamp(currentPage, 0, totalPages - 1);
+            pageText.pageToDisplay = currentPage + 1;
+            if (pageTextBack != null)
+                pageTextBack.pageToDisplay = currentPage + 1;
+        }
+        else
+        {
+            currentPage = Mathf.Clamp(currentPage, 0, pages.Length - 1);
+            string content = pages[currentPage] ?? "";
+            pageText.text = content;
+            if (pageTextBack != null)
+            {
+                MatchPageTextFormat(pageTextBack, pageText);
+                pageTextBack.text = content;
+                CanvasGroup cg = pageTextBack.GetComponent<CanvasGroup>();
+                if (cg != null)
+                    cg.alpha = 0f;
+            }
+            totalPages = pages.Length;
         }
 
+        _totalPages = Mathf.Max(1, totalPages);
+
         if (pageNumberText != null)
-            pageNumberText.text = "Page " + (currentPage + 1) + " of " + pages.Length;
+            pageNumberText.text = "Page " + (currentPage + 1) + " of " + _totalPages;
         if (prevButton != null)
             prevButton.interactable = (currentPage > 0) && !_pageTurnBusy;
         if (nextButton != null)
-            nextButton.interactable = (currentPage < pages.Length - 1) && !_pageTurnBusy;
+            nextButton.interactable = (currentPage < _totalPages - 1) && !_pageTurnBusy;
         if (closeButton != null)
             closeButton.interactable = true;
     }
+
+    static string JoinPagesForAutoPagination(string[] entries)
+    {
+        if (entries == null || entries.Length == 0) return "";
+        if (entries.Length == 1) return entries[0] ?? "";
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < entries.Length; i++)
+        {
+            if (i > 0) sb.Append("\n\n");
+            sb.Append(entries[i] ?? "");
+        }
+        return sb.ToString();
+    }
+
+    int GetTotalPages() => Mathf.Max(1, _totalPages);
 
     static void MatchPageTextFormat(TMP_Text dest, TMP_Text src)
     {
@@ -681,14 +757,14 @@ public class BookController : MonoBehaviour
         if (prevButton != null)
             prevButton.interactable = !locked && currentPage > 0;
         if (nextButton != null)
-            nextButton.interactable = !locked && currentPage < pages.Length - 1;
+            nextButton.interactable = !locked && currentPage < GetTotalPages() - 1;
         if (closeButton != null)
             closeButton.interactable = true;
     }
 
     public void NextPage()
     {
-        if (_pageTurnBusy || pages == null || currentPage >= pages.Length - 1)
+        if (_pageTurnBusy || pages == null || currentPage >= GetTotalPages() - 1)
             return;
         PlayPageTurnSound();
         if (usePageSlideAnimation)
@@ -762,7 +838,16 @@ public class BookController : MonoBehaviour
         float hinge = direction > 0 ? -pageSwipeHingeDegrees : pageSwipeHingeDegrees;
 
         MatchPageTextFormat(pageTextBack, pageText);
-        pageTextBack.text = pages[nextIdx];
+        if (useAutomaticPagination)
+        {
+            // Both layers share the same full text; the back layer just shows the next sub-page.
+            pageTextBack.text = pageText.text;
+            pageTextBack.pageToDisplay = nextIdx + 1;
+        }
+        else
+        {
+            pageTextBack.text = pages[nextIdx];
+        }
 
         CanvasGroup frontCg = pageText.GetComponent<CanvasGroup>();
         CanvasGroup backCg = pageTextBack.GetComponent<CanvasGroup>();
@@ -804,7 +889,14 @@ public class BookController : MonoBehaviour
         backRt.anchoredPosition = new Vector2(0f, py);
 
         currentPage = nextIdx;
-        pageText.text = pages[currentPage];
+        if (useAutomaticPagination)
+        {
+            pageText.pageToDisplay = currentPage + 1;
+        }
+        else
+        {
+            pageText.text = pages[currentPage];
+        }
         ResetPageTurnVisuals();
     }
 

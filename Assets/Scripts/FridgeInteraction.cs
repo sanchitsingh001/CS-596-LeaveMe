@@ -46,6 +46,16 @@ public class FridgeInteraction : MonoBehaviour
     public AudioClip openSound;
     public AudioClip closeSound;
 
+    [Header("Audio")]
+    [Tooltip("Optional pre-configured AudioSource. If null, one is created with " +
+             "tight 3D rolloff defaults (min=1, max=8, logarithmic).")]
+    public AudioSource audioSource;
+    [Tooltip("Volume of the open/close clip (0–1).")]
+    [Range(0f, 1f)] public float audioVolume = 1f;
+    [Tooltip("Skip this many seconds at the start of the clip — useful to skip " +
+             "MP3 encoder padding / leading silence so audio matches the visual.")]
+    [Range(0f, 0.25f)] public float audioStartOffset = 0.04f;
+
     // ── State ─────────────────────────────────────────────────────────────────
 
     // Each FridgeInteraction component tracks its OWN open state independently,
@@ -59,9 +69,10 @@ public class FridgeInteraction : MonoBehaviour
     /// <summary>
     /// Set to true this frame by FridgeInteraction when it consumes [F].
     /// PickupAndPlace reads this to skip its own F handling.
-    /// Cleared at end of each FridgeInteraction.Update().
+    /// Cleared once at the beginning of the next frame.
     /// </summary>
     public static bool FKeyConsumedThisFrame = false;
+    private static int _lastFKeyResetFrame = -1;
 
     // Door saved rotations
     private Quaternion _leftClosed, _leftOpen;
@@ -78,23 +89,46 @@ public class FridgeInteraction : MonoBehaviour
 
     private void Start()
     {
-        _audio = gameObject.AddComponent<AudioSource>();
-        _audio.spatialBlend = 1f;
-        _audio.playOnAwake = false;
+        // Prefer a pre-configured AudioSource on this GameObject (or assigned in the
+        // Inspector) so designers can tune Min/Max Distance and Spatial Blend without
+        // editing code. Fall back to a runtime AudioSource with sensible 3D defaults
+        // (tight rolloff so the clip stays audible at the player's interaction range
+        // but doesn't bleed across the whole map).
+        if (audioSource == null)
+            audioSource = GetComponent<AudioSource>();
+        if (audioSource == null)
+        {
+            audioSource = gameObject.AddComponent<AudioSource>();
+            audioSource.spatialBlend  = 0.85f;
+            audioSource.rolloffMode   = AudioRolloffMode.Logarithmic;
+            audioSource.minDistance   = 1f;
+            audioSource.maxDistance   = 8f;
+            audioSource.dopplerLevel  = 0f;
+        }
+        audioSource.playOnAwake = false;
+        _audio = audioSource;
+
+        // Force-load the assigned clips so the first PlayOneShot doesn't hitch
+        // while the file is decompressed off disk. Cheap one-time cost on Start.
+        if (openSound  != null && openSound.loadState  != AudioDataLoadState.Loaded) openSound.LoadAudioData();
+        if (closeSound != null && closeSound.loadState != AudioDataLoadState.Loaded) closeSound.LoadAudioData();
 
         _pickup = FindAnyObjectByType<PickupAndPlace>();
 
         if (mode == InteractionMode.SwingDoor)
         {
+            // Open rotations are RELATIVE to the closed pivot orientation, not absolute.
+            // Doing `Quaternion.Euler(0, swingAngle, 0)` directly snaps the door to that
+            // absolute local rotation and breaks any door whose pivot isn't identity.
             if (leftDoorPivot != null)
             {
                 _leftClosed = leftDoorPivot.localRotation;
-                _leftOpen   = Quaternion.Euler(0f, swingAngle, 0f);
+                _leftOpen   = _leftClosed * Quaternion.Euler(0f, swingAngle, 0f);
             }
             if (rightDoorPivot != null)
             {
                 _rightClosed = rightDoorPivot.localRotation;
-                _rightOpen   = Quaternion.Euler(0f, -swingAngle, 0f);
+                _rightOpen   = _rightClosed * Quaternion.Euler(0f, -swingAngle, 0f);
             }
         }
         else
@@ -105,16 +139,53 @@ public class FridgeInteraction : MonoBehaviour
                 _drawerOpen   = _drawerClosed + new Vector3(0f, 0f, drawerSlideDistance);
             }
         }
+
+        RegisterExistingPlacedItems();
+    }
+
+    private void RegisterExistingPlacedItems()
+    {
+        // Capture any items that were already placed into zones in the editor
+        // so they participate in hide-on-close / show-on-open.
+        PlacementZone[] candidateZones;
+        if (assignedZones != null && assignedZones.Length > 0)
+        {
+            candidateZones = assignedZones;
+        }
+        else
+        {
+            Transform fridgeRoot = transform.parent != null ? transform.parent : transform;
+            candidateZones = fridgeRoot.GetComponentsInChildren<PlacementZone>();
+        }
+
+        foreach (var zone in candidateZones)
+        {
+            if (zone == null) continue;
+            var item = zone.GetPlacedItem();
+            if (item == null) continue;
+            if (!_storedItems.Contains(item))
+                _storedItems.Add(item);
+        }
+
+        // Apply current visibility (fridge starts closed)
+        bool shouldBeVisible = _isOpen;
+        foreach (var item in _storedItems)
+        {
+            if (item == null) continue;
+            SetAllRenderers(item, shouldBeVisible);
+            SetAllColliders(item, shouldBeVisible);
+        }
     }
 
     private void Update()
     {
         _showHint = false;
 
-        // Reset the static F-consumed flag once per frame (only the first component does it)
-        // We piggyback on LateUpdate ordering — a simpler approach: clear at start of Update
-        // since all FridgeInteraction instances share one Update pass.
-        FKeyConsumedThisFrame = false;
+        if (_lastFKeyResetFrame != Time.frameCount)
+        {
+            FKeyConsumedThisFrame = false;
+            _lastFKeyResetFrame = Time.frameCount;
+        }
 
         if (_isAnimating) return;
 
@@ -238,6 +309,8 @@ public class FridgeInteraction : MonoBehaviour
         // Register so we can hide/show on door/drawer close/open
         if (!_storedItems.Contains(held))
             _storedItems.Add(held);
+
+        LogbookStoryManager.Instance?.NotifyFridgeItemPlaced(held);
     }
 
     private IEnumerator AnimateSwingDoors()
@@ -264,6 +337,9 @@ public class FridgeInteraction : MonoBehaviour
         if (rightDoorPivot != null) rightDoorPivot.localRotation = rightTarget;
 
         _isOpen = !_isOpen;
+
+        if (_isOpen)
+            LogbookStoryManager.Instance?.NotifyAction(LogbookStoryManager.LogbookAction.FridgeOpened);
 
         // Items should be VISIBLE when the door is open, HIDDEN when closed.
         // We only toggle renderers — never hide them right after placement.
@@ -295,6 +371,9 @@ public class FridgeInteraction : MonoBehaviour
 
         drawerTransform.localPosition = target;
         _isOpen = !_isOpen;
+
+        if (_isOpen)
+            LogbookStoryManager.Instance?.NotifyAction(LogbookStoryManager.LogbookAction.FridgeOpened);
 
         // Items should be VISIBLE when the drawer is open, HIDDEN when closed.
         bool shouldBeVisible = _isOpen;
@@ -340,8 +419,22 @@ public class FridgeInteraction : MonoBehaviour
     {
         AudioClip clip = _isOpen ? closeSound : openSound;
         if (clip == null) clip = openSound ?? closeSound;
-        if (_audio != null && clip != null)
-            _audio.PlayOneShot(clip);
+        if (_audio == null || clip == null) return;
+
+        // PlayOneShot ignores AudioSource.time, so to skip leading silence we
+        // assign the clip directly and start at audioStartOffset. This makes
+        // the audible attack line up with the door starting to swing.
+        if (audioStartOffset > 0f && audioStartOffset < clip.length)
+        {
+            _audio.clip   = clip;
+            _audio.volume = audioVolume;
+            _audio.time   = audioStartOffset;
+            _audio.Play();
+        }
+        else
+        {
+            _audio.PlayOneShot(clip, audioVolume);
+        }
     }
 
     private void OnGUI()

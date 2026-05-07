@@ -1,66 +1,28 @@
-# LeaveMe
+# LeaveMe (CS-596 Final Project)
 
-## Group Name
-Yana
+## Very short narrative (brief)
+You play as a streamer alone in her room. Ordinary routines (food, phone, window, etc.) start feeling “observed” as a stalker’s presence creeps in through sound and subtle changes. A logbook appears and begins documenting you, and the story escalates toward a CCTV reveal ending.
 
-## Git Repository
-https://github.com/sanchitsingh001/CS-596-LeaveMe.git
+## How to run
+- Open the Unity project in `CS-596-LeaveMe/`
+- Open scene: `Assets/Scenes/MainScene.unity`
+- Press Play
 
----
+## Controls
+- **WASD**: move
+- **Mouse**: look
+- **E**: interact (phone, fridge, microwave, door/window, chair, book, etc.)
+- **F**: pick up / place objects (tagged `Pickable`)
+- **T**: phone text (when interacting with/holding the phone)
 
-## Members and Roles
+## What to do (game loop)
+- Explore and interact with room props.
+- After a few interactions, the **logbook** appears; read it and keep interacting to progress.
+- Try phone call + text, then investigate who’s watching for the ending beat.
 
-- **Sanchit Singh** — Creative Writer, Game Developer  
-  Co-developed the storyline and psychological horror concept. Worked on gameplay development, asset creation, and collaborated on finding and implementing sound/audio resources for the game.
+## Team
+- **Sanchit Singh** — Creative Writer, Game Developer
+- **Jai Sharma** — Creative Writer, Game Developer
 
-- **Jai Sharma** — Creative Writer, Game Developer  
-  Contributed to the story design and psychological horror elements. Helped develop gameplay systems and worked on creating assets for the game. Also assisted in sourcing audio and sound effects to enhance the horror experience.
-
----
-
-## Game Description
-
-**LeaveMe** is a psychological horror game set entirely inside a streamer’s room. The player takes on the role of a streamer who is trapped inside her room while one of her fans becomes a dangerous stalker. The confined setting creates a strong sense of tension and isolation, as the player has no way to escape and must rely on awareness and decision-making to survive.
-
-The gameplay focuses on reacting to environmental and audio cues. Players will hear unsettling sounds such as knocking, movement, and other disturbances that suggest the stalker is nearby. The main objective is to prevent the stalker from entering the room by responding correctly to these events. The tension increases as the game progresses, making the experience more unpredictable and psychologically intense.
-
-This project incorporates key concepts from class such as player interaction, event-driven gameplay, sound design, and basic system logic. We are using audio cues, environmental triggers, and interactive elements to create a responsive horror experience. Our goal is to build a playable prototype that demonstrates a clear gameplay loop and aligns with the final project rubric.
-
----
-
-## Game Status
-
-The game is currently in the **prototype phase**, but it already shows the direction we are heading.
-
-So far, we have:
-- Created and set up the GitHub repository
-- Uploaded the initial project skeleton
-- Begun developing the core concept and gameplay idea
-- Started gathering and integrating audio elements for the horror experience
-
-Next steps:
-- Implement core gameplay mechanics (interaction, event triggers)
-- Add more audio-based horror elements
-- Improve environment and immersion
-- Continue building toward a complete playable experience
-
----
-
-## Assistance / Notes
-
-We may need assistance with:
-- Implementing more advanced sound/event systems
-- Improving the psychological horror experience
-- Debugging and optimizing gameplay systems
-
----
-
-## Notes for Instructor / TA
-
-This repository includes:
-- Group member roles
-- Detailed game description
-- Initial project setup (skeleton)
-- Early-stage prototype progress
-
-We will continue updating the project as development progresses.
+## Repo
+- `https://github.com/sanchitsingh001/CS-596-LeaveMe.git`

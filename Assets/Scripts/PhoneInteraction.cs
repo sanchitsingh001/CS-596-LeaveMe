@@ -15,6 +15,16 @@ public class PhoneInteraction : MonoBehaviour
     [Header("Interaction")]
     public float interactDistance = 2.5f;
 
+    [Header("Held pose (optional)")]
+    [Tooltip("If true, adds/updates a HeldItemOffsets component so the phone sits nicely when held.")]
+    public bool autoConfigureHeldOffsets = true;
+    [Tooltip("Local position offset relative to the player's holdPosition while held.")]
+    public Vector3 heldLocalPositionOffset = new Vector3(0.18f, -0.14f, 0.32f);
+    [Tooltip("Local rotation offset (euler) relative to the player's holdPosition while held.")]
+    public Vector3 heldLocalEulerOffset = new Vector3(0f, 225f, 0f);
+    [Tooltip("If true, the phone will face the player's camera while held (recommended).")]
+    public bool heldFaceCamera = true;
+
     [Header("Ringing")]
     [Tooltip("Seconds between automatic ring cycles.")]
     public float ringInterval = 120f;
@@ -23,8 +33,6 @@ public class PhoneInteraction : MonoBehaviour
 
     [Header("Audio")]
     public AudioClip ringingSound;
-    [Tooltip("Leave empty to disable vibration buzz.")]
-    public AudioClip vibrationSound;
     public AudioClip typingSound;
     public AudioClip notificationSound;
     public AudioClip dialingSound;
@@ -42,19 +50,45 @@ public class PhoneInteraction : MonoBehaviour
     private bool        _showHint = false;
     private GUIStyle    _hintStyle;
     private int         _missedCalls = 0;
-    private int         _unreadTexts = 0;
 
     private static readonly int EmissionColor = Shader.PropertyToID("_EmissionColor");
     private Material _screenMat;
+    private PickupAndPlace _pickup;
 
     private void Start()
     {
+        // Ensure the phone can be picked up by the existing system (best-effort).
+        // (Scene setup should still tag it Pickable, but this keeps it robust.)
+        if (!CompareTag("Pickable"))
+        {
+            try { gameObject.tag = "Pickable"; } catch { /* Tag may not exist in project */ }
+        }
+
+        // NOTE: Do not force Rigidbody settings here; it can change the authored
+        // spawn pose and make the phone appear to “float” or shift at scene start.
+        // PickupAndPlace will handle kinematic/gravity toggles while holding/dropping.
+
+        if (autoConfigureHeldOffsets)
+        {
+            // Helps ensure the phone appears "in hand" instead of awkwardly floating at holdPosition.
+            HeldItemOffsets offsets = GetComponent<HeldItemOffsets>();
+            if (offsets == null) offsets = gameObject.AddComponent<HeldItemOffsets>();
+            offsets.localPositionOffset = heldLocalPositionOffset;
+            offsets.localEulerOffset = heldLocalEulerOffset;
+            offsets.faceCameraWhileHeld = heldFaceCamera;
+            // Most phone models have their "screen" normal pointing -Z in local space.
+            offsets.faceCameraLocalForwardAxis = Vector3.back;
+            offsets.faceCameraLocalUpAxis = Vector3.up;
+        }
+
         _audio = gameObject.AddComponent<AudioSource>();
         _audio.spatialBlend = 0.8f;
         _audio.playOnAwake  = false;
 
         if (screenRenderer != null)
             _screenMat = screenRenderer.material;
+
+        _pickup = FindFirstObjectByType<PickupAndPlace>();
 
         // Start the ring cycle
         InvokeRepeating(nameof(TriggerRing), ringInterval * 0.5f, ringInterval);
@@ -97,6 +131,33 @@ public class PhoneInteraction : MonoBehaviour
     {
         _showHint = false;
 
+        // If the phone is currently held, allow interaction regardless of distance/raycast.
+        if (IsHeld())
+        {
+            _showHint = true;
+
+            if (Input.GetKeyDown(KeyCode.E))
+            {
+                switch (_state)
+                {
+                    case PhoneState.Ringing:
+                        AnswerCall();
+                        break;
+                    case PhoneState.InCall:
+                        HangUp();
+                        break;
+                    case PhoneState.Idle:
+                        StartCoroutine(OutgoingCall());
+                        break;
+                }
+            }
+
+            if (Input.GetKeyDown(KeyCode.T) && _state != PhoneState.InCall)
+                StartCoroutine(SendText());
+
+            return;
+        }
+
         // Check distance first as a reliable fallback
         float dist = Vector3.Distance(Camera.main.transform.position, transform.position);
         bool inRange = dist <= interactDistance;
@@ -106,7 +167,8 @@ public class PhoneInteraction : MonoBehaviour
             new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f));
 
         // Use proximity OR raycast — phone collider may have an offset so proximity is reliable
-        bool looking = Physics.Raycast(ray, out RaycastHit hit, interactDistance,
+        // Use a small spherecast so slight collider/model offsets still feel accurate.
+        bool looking = Physics.SphereCast(ray, 0.12f, out RaycastHit hit, interactDistance,
                            ~0, QueryTriggerInteraction.Collide)
                        && (hit.collider.transform.IsChildOf(transform)
                            || hit.collider.gameObject == gameObject);
@@ -138,8 +200,19 @@ public class PhoneInteraction : MonoBehaviour
             StartCoroutine(SendText());
     }
 
+    private bool IsHeld()
+    {
+        if (_pickup == null) return false;
+        GameObject held = _pickup.GetHeldObject();
+        if (held == null) return false;
+        return held == gameObject || transform.IsChildOf(held.transform);
+    }
+
     private void AnswerCall()
     {
+        LogbookStoryManager.Instance?.NotifyAction(LogbookStoryManager.LogbookAction.PhoneBasicUsed);
+        LogbookStoryManager.Instance?.NotifyAction(LogbookStoryManager.LogbookAction.PhoneCallAttempt);
+
         if (_ringRoutine != null)
             StopCoroutine(_ringRoutine);
         _audio.Stop();
@@ -158,6 +231,9 @@ public class PhoneInteraction : MonoBehaviour
 
     private IEnumerator OutgoingCall()
     {
+        LogbookStoryManager.Instance?.NotifyAction(LogbookStoryManager.LogbookAction.PhoneBasicUsed);
+        LogbookStoryManager.Instance?.NotifyAction(LogbookStoryManager.LogbookAction.PhoneCallAttempt);
+
         _state = PhoneState.InCall;
         SetScreenGlow(true, new Color(0.3f, 1f, 0.5f));
         if (dialingSound != null)
@@ -175,15 +251,29 @@ public class PhoneInteraction : MonoBehaviour
 
     private IEnumerator SendText()
     {
-        _unreadTexts = 0;
+        LogbookStoryManager.Instance?.NotifyAction(LogbookStoryManager.LogbookAction.PhoneBasicUsed);
+        LogbookStoryManager.Instance?.NotifyAction(LogbookStoryManager.LogbookAction.PhoneTextAttempt);
+
         SetScreenGlow(true, new Color(1f, 0.9f, 0.3f));
+
+        // Play "text/typing" audio for ~4 seconds as requested.
+        const float textDurationSeconds = 4f;
         if (typingSound != null)
         {
-            _audio.PlayOneShot(typingSound, 0.8f);
-            yield return new WaitForSeconds(Mathf.Min(typingSound.length, 1.5f));
+            _audio.Stop();
+            _audio.loop = true;
+            _audio.clip = typingSound;
+            _audio.volume = 0.8f;
+            _audio.Play();
+            yield return new WaitForSeconds(textDurationSeconds);
+            _audio.Stop();
+            _audio.loop = false;
+            _audio.clip = null;
         }
         else
-            yield return new WaitForSeconds(1f);
+        {
+            yield return new WaitForSeconds(textDurationSeconds);
+        }
 
         if (notificationSound != null)
             _audio.PlayOneShot(notificationSound, 0.9f);

@@ -56,7 +56,10 @@ public class DoorInteraction : MonoBehaviour
         _showHint = false;
         if (_isAnimating) return;
 
-        Ray ray = Camera.main.ScreenPointToRay(
+        Camera cam = Camera.main;
+        if (cam == null) return;
+
+        Ray ray = cam.ScreenPointToRay(
             new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f));
 
         bool looking = Physics.Raycast(ray, out RaycastHit hit, interactDistance)

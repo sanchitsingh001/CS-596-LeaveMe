@@ -122,6 +122,9 @@ public class PizzaInteraction : MonoBehaviour
 
         if (_audio != null && eatSound != null)
             _audio.PlayOneShot(eatSound);
+
+        // Log with precise counts so the book can say exactly how much is left.
+        LogbookStoryManager.Instance?.NotifyPizzaSliceEaten(_slicesLeft, totalSlices);
     }
 
     private void OnGUI()

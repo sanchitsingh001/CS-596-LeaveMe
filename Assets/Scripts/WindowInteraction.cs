@@ -25,9 +25,11 @@ public class WindowInteraction : MonoBehaviour
     public float interactDistance = 3f;
 
     [Header("Audio")]
-    public AudioClip cityAmbientSound;
-    public AudioClip windowMoveSound;
-    [Range(0f, 1f)] public float ambientVolume = 0.45f;
+    [Tooltip("Looping wind audio. Plays only while the window is open, fades in/out on open/close.")]
+    public AudioClip windLoop;
+    [Range(0f, 1f)] public float windVolume = 0.45f;
+    [Tooltip("Seconds it takes for the wind to fade in/out when opening/closing.")]
+    [Range(0.1f, 5f)] public float windFadeDuration = 1.0f;
 
     [Header("Outside View (auto-created if left empty)")]
     [Tooltip("Leave empty — a sky-blue quad is auto-created behind the window opening.")]
@@ -39,11 +41,9 @@ public class WindowInteraction : MonoBehaviour
     private bool        _showHint    = false;
     private Vector3     _closedPos;
     private Vector3     _openPos;
-    private AudioSource _sfxSource;
-    private AudioSource _ambientSource;
+    private AudioSource _windSource;
     private GUIStyle    _hintStyle;
     private Coroutine   _fadeRoutine;
-    private const float FadeDuration = 1.0f;
 
     private void Start()
     {
@@ -51,16 +51,12 @@ public class WindowInteraction : MonoBehaviour
         // Slide in LOCAL space along the configured axis — works regardless of world rotation
         _openPos   = _closedPos + localSlideAxis.normalized * openSlide;
 
-        _sfxSource             = gameObject.AddComponent<AudioSource>();
-        _sfxSource.spatialBlend = 1f;
-        _sfxSource.playOnAwake  = false;
-
-        _ambientSource             = gameObject.AddComponent<AudioSource>();
-        _ambientSource.spatialBlend = 0.5f;
-        _ambientSource.playOnAwake  = false;
-        _ambientSource.loop         = true;
-        _ambientSource.volume       = 0f;
-        _ambientSource.clip         = cityAmbientSound;
+        _windSource             = gameObject.AddComponent<AudioSource>();
+        _windSource.spatialBlend = 0.5f;
+        _windSource.playOnAwake  = false;
+        _windSource.loop         = true;
+        _windSource.volume       = 0f;
+        _windSource.clip         = windLoop;
 
         if (outsidePlane == null)
             CreateOutsidePlane();
@@ -114,10 +110,8 @@ public class WindowInteraction : MonoBehaviour
     {
         _isAnimating = true;
 
-        if (windowMoveSound != null)
-            _sfxSource.PlayOneShot(windowMoveSound);
-
         bool    opening = !_isOpen;
+
         Vector3 from    = transform.localPosition;
         Vector3 target  = opening ? _openPos : _closedPos;
 
@@ -126,14 +120,16 @@ public class WindowInteraction : MonoBehaviour
         // Audio fade
         if (opening)
         {
-            if (cityAmbientSound != null && !_ambientSource.isPlaying) _ambientSource.Play();
+            // Ensure the assigned clip is used (in case it was changed in Inspector at runtime)
+            _windSource.clip = windLoop;
+            if (windLoop != null && !_windSource.isPlaying) _windSource.Play();
             if (_fadeRoutine != null) StopCoroutine(_fadeRoutine);
-            _fadeRoutine = StartCoroutine(FadeAmbient(ambientVolume));
+            _fadeRoutine = StartCoroutine(FadeWind(windVolume));
         }
         else
         {
             if (_fadeRoutine != null) StopCoroutine(_fadeRoutine);
-            _fadeRoutine = StartCoroutine(FadeAmbient(0f, stopOnFinish: true));
+            _fadeRoutine = StartCoroutine(FadeWind(0f, stopOnFinish: true));
         }
 
         // Slide
@@ -146,21 +142,24 @@ public class WindowInteraction : MonoBehaviour
         transform.localPosition = target;
         _isOpen = !_isOpen;
 
+        LogbookStoryManager.Instance?.NotifyWindowToggled(_isOpen);
+
         if (!_isOpen && outsidePlane != null) outsidePlane.SetActive(false);
         _isAnimating = false;
     }
 
-    private IEnumerator FadeAmbient(float targetVol, bool stopOnFinish = false)
+    private IEnumerator FadeWind(float targetVol, bool stopOnFinish = false)
     {
-        float start = _ambientSource.volume, elapsed = 0f;
-        while (elapsed < FadeDuration)
+        float start = _windSource.volume, elapsed = 0f;
+        float duration = Mathf.Max(0.01f, windFadeDuration);
+        while (elapsed < duration)
         {
             elapsed += Time.deltaTime;
-            _ambientSource.volume = Mathf.Lerp(start, targetVol, elapsed / FadeDuration);
+            _windSource.volume = Mathf.Lerp(start, targetVol, elapsed / duration);
             yield return null;
         }
-        _ambientSource.volume = targetVol;
-        if (stopOnFinish) _ambientSource.Stop();
+        _windSource.volume = targetVol;
+        if (stopOnFinish) _windSource.Stop();
     }
 
     private void OnGUI()

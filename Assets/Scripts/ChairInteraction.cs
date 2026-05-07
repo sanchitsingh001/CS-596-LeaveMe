@@ -66,9 +66,17 @@ public class ChairInteraction : MonoBehaviour
             return;
         }
 
+        Camera cam = Camera.main;
+        if (cam == null)
+        {
+            Debug.LogError("[ChairInteraction] No Camera with tag 'MainCamera' found.", this);
+            enabled = false;
+            return;
+        }
+
         _playerTransform   = player.transform;
         _characterController = player.GetComponent<CharacterController>();
-        _cameraTransform   = Camera.main.transform;
+        _cameraTransform   = cam.transform;
         _eyeHeight         = _cameraTransform.localPosition.y;
 
         _audio = gameObject.AddComponent<AudioSource>();
@@ -99,7 +107,9 @@ public class ChairInteraction : MonoBehaviour
         _showHint = false;
         if (!_isSeated)
         {
-            Ray ray = Camera.main.ScreenPointToRay(new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f));
+            Camera cam = Camera.main;
+            if (cam == null) return;
+            Ray ray = cam.ScreenPointToRay(new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f));
             if (Physics.Raycast(ray, out RaycastHit hit, interactDistance)
                 && (hit.collider.transform.IsChildOf(transform) || hit.collider.gameObject == gameObject))
             {
@@ -196,11 +206,14 @@ public class ChairInteraction : MonoBehaviour
 
         _playerTransform.position = targetPlayerPos;
 
-        // Re-enable look-only: we keep movement disabled (WASD handled above for rolling)
-        playerController?.SetMovementAndLookEnabled(true);
+        // Allow mouse-look while seated; WASD rolling is handled by this script.
+        playerController?.SetLookEnabled(true);
+        playerController?.SetMovementEnabled(false);
 
         _isSeated        = true;
         _isTransitioning = false;
+
+        LogbookStoryManager.Instance?.NotifyAction(LogbookStoryManager.LogbookAction.ChairSat);
     }
 
     private IEnumerator StandUp()

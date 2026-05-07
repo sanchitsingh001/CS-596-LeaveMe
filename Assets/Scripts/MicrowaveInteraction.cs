@@ -123,6 +123,9 @@ public class MicrowaveInteraction : MonoBehaviour
         doorPivot.localRotation = target;
         _isOpen      = !_isOpen;
         _isAnimating = false;
+
+        if (_isOpen)
+            LogbookStoryManager.Instance?.NotifyAction(LogbookStoryManager.LogbookAction.MicrowaveOpened);
     }
 
     // ── Cooking cycle ──────────────────────────────────────────────────────────
