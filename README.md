@@ -3,6 +3,15 @@
 ## Very short narrative (brief)
 You play as a streamer alone in her room. Ordinary routines (food, phone, window, etc.) start feeling “observed” as a stalker’s presence creeps in through sound and subtle changes. A logbook appears and begins documenting you, and the story escalates toward a CCTV reveal ending.
 
+## Gameplay Video
+
+Watch the gameplay video here:  
+[LeaveMe Gameplay Video](https://drive.google.com/file/d/11E3KZ8DIqkKvhvAuye-FxiLCS54PIpCy/view?usp=sharing)
+
+**Note:** Please play the video at full volume. Audio cues are important to the experience.
+
+At the end of the video, the **doorbell sound indicates that someone has entered the room**, confirming the stalker’s physical presence.
+
 ## How to run
 - Open the Unity project in `CS-596-LeaveMe/`
 - Open scene: `Assets/Scenes/MainScene.unity`
